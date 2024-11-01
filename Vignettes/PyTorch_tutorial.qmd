@@ -1,0 +1,232 @@
+---
+title: "PyTorch Tutorial"
+author: "Rafael Alcantara"
+format: html
+editor: visual
+---
+
+# Prologue
+
+To get Python and relevant libraries working in Quarto:
+
+Run in terminal:
+
+``` {style="color: green; background-color: lightgray"}
+conda create -n PyTorch python=3.10 pytorch torchvision torchtext torchaudio -c pytorch
+```
+
+If need to add more stuff to that environment, run in terminal:
+
+``` {style="color: green; background-color: lightgray"}
+conda activate PyTorch + pip3 install package (etc.)
+```
+
+Run this in R preamble:
+
+```{r}
+reticulate::use_condaenv(condaenv = "PyTorch")
+```
+
+Testing if it works, run this in Python code block:
+
+```{python}
+import os, sys
+os.path.dirname(sys.executable)
+```
+
+We will run the tutorial from <https://pytorch.org/tutorials/beginner/basics/intro.html>.
+
+# Quickstart
+
+Loading relevant libraries:
+
+```{python}
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from torchvision import datasets
+from torchvision.transforms import ToTensor
+```
+
+Downloading data for tutorial:
+
+```{python}
+# Download training data from open datasets.
+training_data = datasets.FashionMNIST(
+    root="data",
+    train=True,
+    download=True,
+    transform=ToTensor(),
+)
+
+# Download test data from open datasets.
+test_data = datasets.FashionMNIST(
+    root="data",
+    train=False,
+    download=True,
+    transform=ToTensor(),
+)
+```
+
+Creating data loaders:
+
+```{python}
+batch_size = 64
+
+# Create data loaders.
+train_dataloader = DataLoader(training_data, batch_size=batch_size)
+test_dataloader = DataLoader(test_data, batch_size=batch_size)
+
+for X, y in test_dataloader:
+    print(f"Shape of X [N, C, H, W]: {X.shape}")
+    print(f"Shape of y: {y.shape} {y.dtype}")
+    break
+```
+
+Creating a basic model:
+
+## BUG
+
+```{python}
+# Get cpu, gpu or mps device for training.
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
+)
+print(f"Using {device} device")
+
+# Define model
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super(NeuralNetwork,self).__init__()
+        self.flatten = nn.Flatten()
+        self.l1 = nn.Linear(28*28, 512),
+        self.l2 = nn.Linear(512, 512),
+        self.l3 = nn.Linear(512, 10)
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = F.relu(self.l1(x))
+        x = F.relu(self.l2(x))
+        x = F.log_softmax(self.l3(x),dim=1)
+        return x
+
+model = NeuralNetwork().to(device)
+print(model)
+```
+
+Add hook to extract a given layer, as per <https://discuss.pytorch.org/t/how-can-l-load-my-best-model-as-a-feature-extractor-evaluator/17254/5>:
+
+```{python}
+# activation = {}
+# def get_activation(name):
+#     def hook(model, input, output):
+#         activation[name] = output.detach()
+#     return hook
+# 
+# model.l2.register_forward_hook(get_activation(l2))
+```
+
+Defining loss function and optimizer:
+
+```{python}
+loss_fn = nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+```
+
+Creating training function:
+
+```{python}
+def train(dataloader, model, loss_fn, optimizer):
+    size = len(dataloader.dataset)
+    model.train() ## Get into training mode
+    for batch, (X, y) in enumerate(dataloader):
+        X, y = X.to(device), y.to(device)
+
+        # Compute prediction error
+        pred = model(X)
+        loss = loss_fn(pred, y)
+
+        # Backpropagation
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        if batch % 100 == 0:
+            loss, current = loss.item(), (batch + 1) * len(X)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+```
+
+Creating testing function:
+
+```{python}
+def test(dataloader, model, loss_fn):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    model.eval() ## Tell it to not train the model again (go into evaluation mode)
+    test_loss, correct = 0, 0
+    with torch.no_grad(): ## Don't calculate gradients (since it's not training)
+        for X, y in dataloader:
+            X, y = X.to(device), y.to(device)
+            pred = model(X)
+            test_loss += loss_fn(pred, y).item()
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+```
+
+Running the model for 5 epochs:
+
+```{python}
+epochs = 5
+for t in range(epochs):
+    print(f"Epoch {t+1}\n-------------------------------")
+    train(train_dataloader, model, loss_fn, optimizer)
+    test(test_dataloader, model, loss_fn)
+print("Done!")
+```
+
+Saving the model:
+
+```{python}
+torch.save(model.state_dict(), "model.pth")
+print("Saved PyTorch Model State to model.pth")
+```
+
+Loading the model:
+
+```{python}
+# model = NeuralNetwork().to(device)
+# model.load_state_dict(torch.load("model.pth", weights_only=True))
+```
+
+Making predictions:
+
+```{python}
+classes = [
+    "T-shirt/top",
+    "Trouser",
+    "Pullover",
+    "Dress",
+    "Coat",
+    "Sandal",
+    "Shirt",
+    "Sneaker",
+    "Bag",
+    "Ankle boot",
+]
+
+model.eval()
+x, y = test_data[0][0], test_data[0][1]
+with torch.no_grad():
+    x = x.to(device)
+    pred = model(x)
+    predicted, actual = classes[pred[0].argmax(0)], classes[y]
+    print(f'Predicted: "{predicted}", Actual: "{actual}"')
+    print(activation['l2'])
+```
