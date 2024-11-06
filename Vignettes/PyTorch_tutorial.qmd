@@ -7,14 +7,18 @@ format:
 editor: visual
 ---
 
-# Prologue
+# Quarto setup
 
 In this section, we describe the steps to get Python and relevant libraries working in Quarto. If not running in Quarto, or if Quarto is already setup in your machine, skip to the next section.
 
--   Run in terminal:
+If running on Windows, get miniconda [here](https://docs.anaconda.com/miniconda/)[^1].
+
+[^1]: Might be necessary to choose the "install for all users" option; some useful resources for Windows include <https://stackoverflow.com/questions/59721699/anaconda-is-unable-to-create-process-on-windows10>, <https://stackoverflow.com/questions/60120763/r-reticulate-unable-to-locate-conda-environment-when-attempting-to-use-condae> and <https://stackoverflow.com/questions/35709497/anaconda-python-where-are-the-virtual-environments-stored>
+
+-   Run in terminal (use Anaconda terminal if on Windows):
 
 ``` {style="color: green; background-color: lightgray"}
-conda create -n PyTorch python=3.10 pytorch torchvision torchtext torchaudio -c pytorch
+conda create -n PyTorch python=3.11 pytorch torchvision torchtext torchaudio -c pytorch
 ```
 
 -   If eventually you need to add more packages to that environment, run in terminal:
@@ -27,8 +31,22 @@ pip3 install package (etc.)
 -   Run this in R code block in the preamble:
 
 ```{r}
-reticulate::use_condaenv(condaenv = "PyTorch")
+if (Sys.info()["sysname"]=="Windows")
+  {
+    reticulate::use_condaenv(condaenv = "C:\\Users\\Rafael Alcantara\\.conda\\envs\\PyTorch")
+  } else
+  {
+    reticulate::use_condaenv(condaenv = "PyTorch")
+  }
 ```
+
+-   If you need to get the exact path for the conda environment (in case it's not in the path for R), do:
+
+    ``` {style="color: green; background-color: lightgray"}
+    conda activate PyTorch
+    echo %CONDA_PREFIX% # (Windows)
+    echo $CONDA_PREFIX
+    ```
 
 -   To check if everything works, run this in Python code block:
 
@@ -72,7 +90,9 @@ test_data = datasets.FashionMNIST(
 )
 ```
 
-Then, we create data loaders for each data set. `DataLoader` is a class from `torch.utils.data` which \`\`**wraps an iterable around the `Dataset` to enable easy access to the samples**'' (from the [PyTorch tutorial on data classes](https://pytorch.org/tutorials/beginner/basics/data_tutorial.html); see [documentation](https://pytorch.org/docs/stable/data.html) for more details).
+Then, we create data loaders for each data set. `DataLoader` is a class from `torch.utils.data` which \`\`**wraps an iterable around the `Dataset` to enable easy access to the samples**'' (from the [PyTorch tutorial on data classes](https://pytorch.org/tutorials/beginner/basics/data_tutorial.html); see [documentation](https://pytorch.org/docs/stable/data.html) for more details)[^2].
+
+[^2]: For a pretty straightforward introduction to Python loops, iterators *etc.*, check <https://realpython.com/python-for-loop/>; basically, the loop internally does `iter(x)` to get the iterator, `next()` to move forward in the object *etc.*
 
 ```{python}
 batch_size = 64
@@ -105,7 +125,9 @@ We can now proceed to create a basic NN model. Each model is defined by a class 
 
 ## Model class
 
-This model consists of 3 linear layers, with a ReLU activation function between each.
+This model consists of 3 linear layers, with a ReLU activation function between each (in this case, the dimension of the output of the last layer, 10, must equal the number of classes)[^3].
+
+[^3]: Check `nn.Module` [documentation](https://github.com/pytorch/pytorch/blob/c19c38469030cdf399714eb2051887f4583006a8/torch/nn/modules/module.py) for more details and a small example
 
 ```{python}
 # Define model
@@ -178,18 +200,31 @@ def test(dataloader, model, loss_fn):
 
 ## Hook for layer output
 
-Add hook to extract a given layer [^1] [^2]:
+Add hook to extract a given layer [^4] [^5]:
 
-[^1]: <https://www.geeksforgeeks.org/what-are-pytorch-hooks-and-how-are-they-applied-in-neural-network-layers/>
+[^4]: <https://www.geeksforgeeks.org/what-are-pytorch-hooks-and-how-are-they-applied-in-neural-network-layers/>
 
-[^2]: <https://discuss.pytorch.org/t/how-can-l-load-my-best-model-as-a-feature-extractor-evaluator/17254/5>
+[^5]: <https://discuss.pytorch.org/t/how-can-l-load-my-best-model-as-a-feature-extractor-evaluator/17254/5>
 
 ```{python}
 activation = {}
 
-def hook(model, input, output):
-  activation['l3'] = output.detach()
+def get_activation(name):
+  def hook(model,input,output):
+    activation[name] = output.detach()
+  return hook
 ```
+
+The structure here is as follows. The hook function is structured as:
+
+``` {style="color: green; background-color: lightgray"}
+def hook(model,input,output):
+  activation['layer'] = output.detach()
+```
+
+The outer function is just a wrapper to make it easier to extract any layer via the `name` parameter.
+
+Important note: hooks only work after you register them. So, if you train the model, and then register the hook, the `activation` object will be empty. Only if you register the hook before you train the model, test it *etc.*, you can recover the layer.
 
 # Model training and evaluation
 
@@ -207,7 +242,8 @@ print("Done!")
 Now that we've finished training the model, we register the hook to extract the last layer:
 
 ```{python}
-model.l3.register_forward_hook(hook)
+model.l2.register_forward_hook(get_activation('l2'))
+model.l3.register_forward_hook(get_activation('l3'))
 ```
 
 If we want to save/load the model, run this:
@@ -223,8 +259,6 @@ We can check what the output from the last layer looks like:
 
 ```{python}
 print(activation)
-# print(activation['l3'].shape)
-# print(activation['l3'])
 ```
 
 Finally, we can make predictions for new data points:
@@ -250,9 +284,12 @@ with torch.no_grad():
     pred = model(x)
     predicted, actual = classes[pred[0].argmax(0)], classes[y]
     print(f'Predicted: "{predicted}", Actual: "{actual}"')
-    print(activation)
+    print(activation['l2'].shape)
+    print(activation['l2'])
+    print(activation['l3'].shape)
+    print(activation['l3'])
 ```
 
 # To do
 
--   Check how hook works (why it only works after `model(x)`)
+Right now, I've only figured out how to get the layers per observation. If I evaluate the model with the whole test set, the layers are recovered per batch (if I understand it correctly), but if I do it per observation I can get the layers for each point. There probably is a more efficient way of doing this, but I haven't figured it out yet.
